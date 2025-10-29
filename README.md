@@ -8,7 +8,7 @@ Rust製Lambda関数でOpenTelemetryを使用したサンプルプロジェクト
 
 正確性の面では下記の記事を参考にしてください
 
-
+https://zenn.dev/utcarnivaldayo/articles/2025-10-19-otlp-endpoint-lambda-rust
 
 ## 🏗️ アーキテクチャ
 
