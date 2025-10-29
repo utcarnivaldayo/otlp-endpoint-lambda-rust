@@ -1,0 +1,40 @@
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["macros"] }
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"
+utoipa = { version = "5", features = ["yaml"] }
+utoipa-axum = "0.2"
+utoipa-scalar = { version = "0.3", features = ["axum"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "local-time", "env-filter"] }
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", features = ["trace", "metrics", "logs", "grpc-tonic"] }
+opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
+opentelemetry-appender-tracing = "0.31"
+tracing-opentelemetry = "0.32"
+opentelemetry-http = "0.31"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dependencies.lambda_http]
+version = "0.17"
+optional = true
+default-features = false
+features = [ "apigw_http", "opentelemetry" ]
+
+[dev-dependencies]
+opentelemetry-stdout = "0.31"
+
+[build-dependencies]
+git-url-parse = "0.6"
+
+[features]
+lambda = ["lambda_http"]

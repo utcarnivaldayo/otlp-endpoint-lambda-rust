@@ -1,0 +1,51 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    send_batch_size: 1
+    timeout: 200ms
+  decouple:
+    max_queue_size: 200
+
+exporters:
+  otlphttp/logs:
+    compression: gzip
+    logs_endpoint: https://logs.ap-northeast-1.amazonaws.com/v1/logs
+    headers:
+      x-aws-log-group: /aws/lambda/dev-otlp-endpoint-lambda-rust-api-lambda
+      x-aws-log-stream: default
+    auth:
+      authenticator: sigv4auth/logs
+
+  otlphttp/traces:
+    compression: gzip
+    traces_endpoint: https://xray.ap-northeast-1.amazonaws.com/v1/traces
+    auth:
+      authenticator: sigv4auth/traces
+
+extensions:
+  sigv4auth/logs:
+    region: ap-northeast-1
+    service: logs
+  sigv4auth/traces:
+    region: ap-northeast-1
+    service: xray
+
+service:
+  extensions: [sigv4auth/logs, sigv4auth/traces]
+  telemetry:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch, decouple]
+      exporters: [otlphttp/logs]
+    traces:
+      receivers: [otlp]
+      processors: [batch, decouple]
+      exporters: [otlphttp/traces]

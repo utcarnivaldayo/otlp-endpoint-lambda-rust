@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+
+function awspp() {
+
+  local _pulumi_stack=''
+  local _aws_profile=''
+  local _branch=''
+  local _verbose='false'
+  local _help='false'
+  local _unknown_option='false'
+  local _help='false'
+
+  # parse options
+  while :; do
+    case "${1-}" in
+    -s | --stack)
+      _pulumi_stack="${2:-}"
+      shift
+      ;;
+    -b | --branch)
+      _branch="${2:-}"
+      shift
+      ;;
+    -v | --verbose)
+      _verbose='true'
+      ;;
+    -h | --help)
+      _help='true'
+      ;;
+    -?*)
+      _unknown_option='true'
+      ;;
+    *)
+      break
+      ;;
+    esac
+    shift
+  done
+
+  if [[ "${_help}" = 'false' && ${_unknown_option} = 'false' ]]; then
+
+    # get stack by fzf
+    # NOTE: stack 名は「.」 を含む文字列を指定しないこと
+    if [[ -z "${_pulumi_stack}" ]]; then
+      _pulumi_stack="$(find . -maxdepth 1 -type f -name "Pulumi.*.yaml" -print0 \
+        | xargs -0 -n1 basename \
+        | cut -d'.' -f 2 \
+        | fzf)"
+    fi
+
+    # get aws:profile
+    [[ -f "Pulumi.${_pulumi_stack}.yaml" ]] || return 1
+    _aws_profile="$(yq -r '.config.["aws:profile"]' "Pulumi.${_pulumi_stack}.yaml" \
+      | tr -d '[:space:]')"
+  fi
+
+(
+  set -Eeuo pipefail
+
+  function awspp::usage() {
+    cat - <<EOS
+Usage: awspp [-h] [-s <stack>] [-b <branch>] [-v]
+
+Script description:
+  Switch Pulumi stack and AWS profile
+
+Available options:
+
+-h, --help                    Print this help and exit
+-s, --stack <stack>           Specify Pulumi stack to use. If empty specified, set by fzf.
+-b, --branch <branch>         Specify git branch to switch. Current branch is used by default.
+-v, --verbose                 Print debug info
+EOS
+  }
+
+  function awspp::git_switch_by_pulumi_stack() {
+    local -r _stack_name="${1}"
+    local -r _branch="${2:-}"
+
+    if ! command -v git &>/dev/null; then
+      echo "git command not found." >&2
+      return 1
+    fi
+
+    if [[ -n "${_branch}" ]]; then
+      if ! git branch | grep -q "${_branch}"; then
+        echo "no ${_branch} branch found." >&2
+        return 1
+      fi
+      git switch "${_branch}" || return 1
+      return 0
+    fi
+
+    if [[ "${_stack_name}" =~ ^(prod|stg|production|staging|main)$ ]]; then
+      if git branch | grep -q 'main'; then
+        git switch main || return 1
+      else
+        echo "no main branch found." >&2
+        return 1
+      fi
+    fi
+  }
+
+  function awspp::exists_aws_profile() {
+    local -r _profile="${1}"
+
+    if ! command -v aws &>/dev/null; then
+      echo "aws command not found." >&2
+      return 1
+    fi
+
+    if aws configure list-profiles | grep -q "${_profile}"; then
+      return 0
+    else
+      echo "AWS profile '${_profile}' does not exist." >&2
+      return 1
+    fi
+  }
+
+  function awspp::aws_sso_login_with_cache() {
+    local -r _profile="${1}"
+
+    if ! command -v aws &>/dev/null; then
+      echo "aws command not found." >&2
+      return 1
+    fi
+
+    aws sts get-caller-identity --profile "${_profile}" &>/dev/null \
+      || aws sso login --profile "${_profile}"
+  }
+
+  function awspp::get_pulumi_state_url_by_pulumi_config() {
+    local -r _stack_name="${1}"
+    local -r _base_dir="${2:-.}"
+    local -r _stack_file="${_base_dir}/Pulumi.${_stack_name}.yaml"
+
+    if ! command -v yq &>/dev/null; then
+      echo "yq command not found." >&2
+      return 1
+    fi
+
+    local _url
+    _url="$(yq -r '.config.["backend:url"]' "${_stack_file}" | tr -d '[:space:]')"
+
+    if [[ -z "${_url}" ]] || [[ "${_url}" = "null" ]]; then
+      echo "stack file '${_stack_file}' does not have 'backend:url' defined." >&2
+      return 1
+    fi
+    echo "${_url}"
+  }
+
+  function awspp::awspp() {
+
+    [[ "${_verbose}" = 'true' ]] && set -x
+    [[ "${_help}" = 'true' ]] && awspp::usage && return 0
+    [[ "${_unknown_option}" = 'true' ]] && awspp::usage && return 1
+
+    # NOTE: prod, stg など共通環境は main ブランチに自動で切り替える
+    echo "git switch ${_branch} and pulumi stack ${_pulumi_stack} start"
+    awspp::git_switch_by_pulumi_stack "${_pulumi_stack}" "${_branch}" || return 1
+    echo "git switch ${_branch} and pulumi stack ${_pulumi_stack} end"
+
+    echo "exists aws profile ${_aws_profile} start"
+    awspp::exists_aws_profile "${_aws_profile}" || return 1
+    echo "exists aws profile ${_aws_profile} end"
+
+    echo "aws sso login with profile ${_aws_profile} start"
+    awspp::aws_sso_login_with_cache "${_aws_profile}" || return 1
+    echo "aws sso login with profile ${_aws_profile} end"
+
+    echo "get pulumi state url for stack ${_pulumi_stack} in profile ${_aws_profile} start"
+    local _pulumi_state_url=''
+    _pulumi_state_url="$(awspp::get_pulumi_state_url_by_pulumi_config "${_pulumi_stack}")"
+    echo "get pulumi state url for stack ${_pulumi_stack} in profile ${_aws_profile} end"
+
+    echo "pulumi login for stack ${_pulumi_stack} in profile ${_aws_profile} start"
+    pulumi login "${_pulumi_state_url}?awssdk=v2&profile=${_aws_profile}" \
+      || return 1
+    echo "pulumi login for stack ${_pulumi_stack} in profile ${_aws_profile} end"
+
+    echo "pulumi stack select for stack ${_pulumi_stack} in profile ${_aws_profile} start"
+    pulumi stack select "${_pulumi_stack}" || return 1
+    echo "pulumi stack select for stack ${_pulumi_stack} in profile ${_aws_profile} end"
+  }
+
+  awspp::awspp || return 1
+) || return 1
+
+  # NOTE: bash ./awspp のようにサブプロセスで実行した場合は環境変数は反映されない
+  export AWS_PROFILE="${_aws_profile}"
+  export PULUMI_STACK="${_pulumi_stack}"
+  export PULUMI_BACKEND_URL=''
+  PULUMI_BACKEND_URL="$(pulumi about --stack "${_pulumi_stack}" --json | jq -r .backend.url)"
+}
+
+awspp "$@"

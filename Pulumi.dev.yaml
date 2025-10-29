@@ -1,0 +1,7 @@
+encryptionsalt: v1:3Od09ue/Eps=:v1:YszKk1Zz47+gcC/p:r7WojRk7T2k6yyOxE7vj4OTlYYz2WA==
+config:
+  aws:region: ap-northeast-1
+  aws:profile: AdministratorAccess-309976293417
+  aws-native:region: ap-northeast-1
+  aws-native:profile: AdministratorAccess-309976293417
+  backend:url: s3://dev-otlp-endpoint-lambda-rust-309976293417
